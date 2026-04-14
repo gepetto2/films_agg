@@ -19,6 +19,27 @@ MULTIKINO_HEADERS = {
     "Accept-Language": "pl-PL,pl;q=0.9",
 }
 
+@app.get("/debug-proxy")
+async def debug_proxy():
+    proxy_url = os.getenv("PROXY_URL")
+    proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
+    
+    async with AsyncSession(proxies=proxies) as client:
+        try:
+            # Ten serwis zwraca tylko Twój aktualny adres IP
+            response = await client.get("https://httpbin.org/ip")
+            return {
+                "configured_proxy": proxy_url,
+                "detected_ip": response.json(),
+                "status": "Proxy działa!"
+            }
+        except Exception as e:
+            return {
+                "status": "Błąd połączenia",
+                "error": str(e),
+                "configured_proxy": proxy_url
+            }
+
 @app.get("/")
 async def get_multikino_films():
     url = "https://www.multikino.pl/api/microservice/showings/cinemas/0011/films"
