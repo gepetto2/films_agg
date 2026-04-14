@@ -1,3 +1,4 @@
+import os
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from curl_cffi.requests import AsyncSession
@@ -22,7 +23,15 @@ MULTIKINO_HEADERS = {
 async def get_multikino_films():
     url = "https://www.multikino.pl/api/microservice/showings/cinemas/0011/films"
     
-    async with AsyncSession(impersonate="chrome", headers=MULTIKINO_HEADERS, timeout=15.0) as client:
+    proxy_url = os.getenv("PROXY_URL")
+    proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
+
+    async with AsyncSession(
+        impersonate="chrome120", 
+        headers=MULTIKINO_HEADERS, 
+        timeout=15.0,
+        proxies=proxies
+    ) as client:
         try:
             await client.get("https://multikino.pl/")
 
