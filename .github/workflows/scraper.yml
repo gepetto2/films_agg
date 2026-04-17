@@ -29,4 +29,4 @@ jobs:
           # GitHub weźmie te wartości z Twoich "Secrets"
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-        run: python scripts/scraper.py
+        run: python backend/main.py
