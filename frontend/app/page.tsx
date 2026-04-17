@@ -18,6 +18,8 @@ export default function Home() {
   const [films, setFilms] = useState<Film[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [expandedFilms, setExpandedFilms] = useState<Record<number, boolean>>({});
+  const [expandedDays, setExpandedDays] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
@@ -36,6 +38,31 @@ export default function Home() {
         setLoading(false);
       });
   }, []);
+
+  const toggleFilm = (index: number) => {
+    setExpandedFilms((prev) => ({
+      ...prev,
+      [index]: !prev[index],
+    }));
+  };
+
+  const toggleDay = (filmIndex: number, date: string) => {
+    const key = `${filmIndex}-${date}`;
+    setExpandedDays((prev) => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
+  };
+
+  const groupShowingsByDate = (showings: Showing[]) => {
+    return showings.reduce((acc, showing) => {
+      if (!acc[showing.date]) {
+        acc[showing.date] = [];
+      }
+      acc[showing.date].push(showing);
+      return acc;
+    }, {} as Record<string, Showing[]>);
+  };
 
   if (loading) {
     return <div className="flex justify-center items-center min-h-screen text-xl text-gray-700 dark:text-gray-200">Ładowanie repertuaru...</div>;
@@ -56,16 +83,51 @@ export default function Home() {
           <div className="space-y-8">
             {films.map((film, index) => (
               <div key={index} className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
-                <h2 className="text-2xl font-semibold mb-6 text-gray-800 dark:text-gray-100">{film.title}</h2>
+                <button
+                  onClick={() => toggleFilm(index)}
+                  className="w-full flex justify-between items-center text-left focus:outline-none"
+                >
+                  <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-100">{film.title}</h2>
+                  <span className="text-gray-400 dark:text-gray-500 text-xl ml-4">
+                    {expandedFilms[index] ? "▲" : "▼"}
+                  </span>
+                </button>
                 
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                  {film.showings.map((showing, idx) => (
-                    <div key={idx} className="p-4 border border-gray-200 dark:border-gray-700 rounded-xl bg-gray-50 dark:bg-gray-900 hover:shadow-md transition">
-                      <p className="font-bold text-xl text-blue-500">{showing.time}</p>
-                      <p className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-2">{showing.date}</p>
-                    </div>
-                  ))}
-                </div>
+                {expandedFilms[index] && (
+                  <div className="mt-6 space-y-4">
+                    {Object.entries(groupShowingsByDate(film.showings)).map(([date, dailyShowings]) => {
+                      const dayKey = `${index}-${date}`;
+                      const isDayExpanded = expandedDays[dayKey];
+                      return (
+                        <div key={date} className="border border-gray-100 dark:border-gray-700 rounded-xl overflow-hidden">
+                          <button
+                            onClick={() => toggleDay(index, date)}
+                            className="w-full flex justify-between items-center p-4 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 text-left focus:outline-none transition-colors"
+                          >
+                            <h3 className="text-lg font-medium text-gray-800 dark:text-gray-200">{date}</h3>
+                            <span className="text-gray-400 dark:text-gray-500">
+                              {isDayExpanded ? "▲" : "▼"}
+                            </span>
+                          </button>
+                          
+                          {isDayExpanded && (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 p-4 bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-700">
+                              {dailyShowings.map((showing, idx) => (
+                                <div key={idx} className="p-4 border border-gray-200 dark:border-gray-700 rounded-xl bg-gray-50 dark:bg-gray-800 hover:shadow-md transition">
+                                  <p className="font-bold text-xl text-blue-500">{showing.time}</p>
+                                  <div className="text-sm font-medium text-gray-600 dark:text-gray-400 mt-1">
+                                    <p>{showing.version}</p>
+                                    <p>{showing.screen}</p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             ))}
           </div>

@@ -1,8 +1,9 @@
 import os
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from urllib.parse import urlencode
-import httpx
+from curl_cffi import requests
+from curl_cffi.requests.errors import RequestsError
+import json
 
 app = FastAPI()
 
@@ -17,33 +18,24 @@ app.add_middleware(
 async def get_multikino_films():
     target_url = "https://www.multikino.pl/api/microservice/showings/cinemas/0011/films"
     
-    api_key = os.getenv("SCRAPEOPS_API_KEY")
-    if not api_key:
-        raise HTTPException(status_code=500, detail="Brak klucza API ScrapeOps na serwerze!")
 
-    params = {
-        "api_key": api_key,
-        "url": target_url,
-        "country": "pl",
-        "keep_headers": "true"
-    }
-    proxy_url = "https://proxy.scrapeops.io/v1/?" + urlencode(params)
-
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "application/json",
-        "Accept-Language": "pl-PL,pl;q=0.9"
-    }
-
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    # Używamy curl_cffi z proxy, co pozwala nam zachować sesję (ciasteczka) i sygnaturę Chrome
+    async with requests.AsyncSession(impersonate="chrome") as client:
         try:
-            response = await client.get(proxy_url, headers=headers)
+            # KROK 1: Wejście na stronę główną, aby Cloudflare nadał nam ciasteczka (np. cf_clearance)
+            await client.get("https://www.multikino.pl/", timeout=60.0)
+            
+            # KROK 2: Właściwe zapytanie do API, przekazując odpowiednie nagłówki
+            headers = {"Referer": "https://www.multikino.pl/", "Accept": "application/json"}
+            response = await client.get(target_url, headers=headers, timeout=60.0)
             
             if response.status_code != 200:
-                raise HTTPException(status_code=response.status_code, detail=f"Błąd API ScrapeOps: {response.text[:200]}")
+                raise HTTPException(status_code=response.status_code, detail=f"Błąd Multikina: {response.text[:200]}")
                 
+            raw_text = response.text
+
             try:
-                data = response.json()
+                data = json.loads(raw_text)
             except ValueError:
                 raise HTTPException(status_code=502, detail=f"Odpowiedź nie jest poprawnym formatem JSON. Fragment: {response.text[:250]}")
             
@@ -84,7 +76,5 @@ async def get_multikino_films():
 
         except HTTPException:
             raise
-        except httpx.RequestError as exc:
-            raise HTTPException(status_code=500, detail=f"Błąd połączenia z API ({type(exc).__name__}): {exc}")
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Błąd parsowania danych: {str(e)}")
