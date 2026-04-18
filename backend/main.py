@@ -63,8 +63,17 @@ async def scrape_and_save():
                     
                 # Sprawdzenie / Dodanie filmu
                 movie_res = supabase.table("movies").select("id").eq("title", title).execute()
+
                 if not movie_res.data:
-                    movie_res = supabase.table("movies").insert({"title": title}).execute()
+                    # Pobranie pierwszego atrybutu (shortName lub name)
+                    film_attrs = film.get("filmAttributes", [])
+                    movie_type = (film_attrs[0].get("shortName") or film_attrs[0].get("name")) if film_attrs else None
+
+                    movie_res = supabase.table("movies").insert({
+                        "title": title, 
+                        "movie_type": movie_type if movie_type != "FAMILIJNY" else None
+                    }).execute()
+
                 movie_id = movie_res.data[0]["id"]
                 
                 for group in film.get("showingGroups", []):
