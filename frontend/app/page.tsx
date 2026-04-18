@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createClient } from "@supabase/supabase-js";
 
 type Showing = {
   date: string;
@@ -14,6 +15,10 @@ type Film = {
   showings: Showing[];
 };
 
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+const supabase = createClient(supabaseUrl, supabaseKey);
+
 export default function Home() {
   const [films, setFilms] = useState<Film[]>([]);
   const [loading, setLoading] = useState(true);
@@ -22,21 +27,43 @@ export default function Home() {
   const [expandedDays, setExpandedDays] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
-    
-    fetch(apiUrl)
-      .then((res) => {
-        if (!res.ok) throw new Error(`Błąd serwera: ${res.status}`);
-        return res.json();
-      })
-      .then((data) => {
-        setFilms(data);
+    const fetchFilms = async () => {
+      try {
+        // Pobieranie filmów wraz ze zagnieżdżonymi seansami z Supabase
+        const { data, error } = await supabase
+          .from("movies")
+          .select(`
+            title,
+            screenings (
+              start_time,
+              room_name
+            )
+          `);
+
+        if (error) throw error;
+
+        const formattedFilms: Film[] = (data || []).map((movie: any) => ({
+          title: movie.title,
+          showings: (movie.screenings || []).map((screening: any) => {
+            const dateObj = new Date(screening.start_time);
+            return {
+              date: dateObj.toLocaleDateString("pl-PL"),
+              time: dateObj.toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" }),
+              screen: screening.room_name || "Brak informacji",
+              version: "Standard", // Zastępcza wartość, gdyż brak tego pola w nowym schemacie bazy
+            };
+          }),
+        }));
+
+        setFilms(formattedFilms);
+      } catch (err: any) {
+        setError(err.message || "Wystąpił błąd podczas pobierania danych z Supabase");
+      } finally {
         setLoading(false);
-      })
-      .catch((err) => {
-        setError(err.message);
-        setLoading(false);
-      });
+      }
+    };
+
+    fetchFilms();
   }, []);
 
   const toggleFilm = (index: number) => {
