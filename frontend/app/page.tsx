@@ -7,6 +7,7 @@ type Showing = {
   time: string;
   cinemaName: string;
   franchise: string;
+  lang: string | null;
 };
 
 type Film = {
@@ -22,6 +23,7 @@ type RawMovieResponse = {
   screenings: {
     start_time: string;
     room_name: string;
+    lang: string | null;
     cinemas: {
       name: string;
       franchise: string | null;
@@ -95,12 +97,19 @@ function FilmCard({ film }: { film: Film }) {
                       return (
                         <div 
                           key={idx} 
-                          className={`p-4 border-2 rounded-xl hover:shadow-md transition ${style.card}`}
+                          className={`p-4 border-2 rounded-xl hover:shadow-md transition flex flex-col justify-between ${style.card}`}
                         >
-                          <p className={`font-bold text-xl ${style.text}`}>
-                            {showing.time}
-                          </p>
-                          <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mt-1">
+                          <div className="flex justify-between items-start">
+                            <p className={`font-bold text-xl ${style.text}`}>
+                              {showing.time}
+                            </p>
+                            {showing.lang && (
+                              <span className="text-[10px] font-bold px-2 py-1 rounded-md bg-black/5 dark:bg-white/10 text-gray-700 dark:text-gray-300 uppercase tracking-wider">
+                                {showing.lang}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mt-2">
                             <p>{showing.cinemaName}</p>
                           </div>
                         </div>
@@ -133,6 +142,7 @@ export default function Home() {
             movie_type,
             screenings (
               start_time,
+              lang,
               cinemas (
                 name,
                 franchise
@@ -157,6 +167,7 @@ export default function Home() {
               time: timeKey,
               cinemaName: screening.cinemas?.name ?? "Brak informacji",
               franchise: screening.cinemas?.franchise ?? "Nieznane",
+              lang: screening.lang ?? null,
             });
           });
 
