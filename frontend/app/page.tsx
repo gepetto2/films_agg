@@ -7,6 +7,7 @@ type Showing = {
   date: string;
   time: string;
   screen: string;
+  cinemaName: string;
   version: string;
 };
 
@@ -38,7 +39,10 @@ export default function Home() {
             movie_type,
             screenings (
               start_time,
-              room_name
+              room_name,
+              cinemas (
+                name
+              )
             )
           `);
 
@@ -52,6 +56,7 @@ export default function Home() {
             return {
               date: dateObj.toLocaleDateString("pl-PL"),
               time: dateObj.toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" }),
+              cinemaName: screening.cinemas?.name || "Brak informacji",
               screen: screening.room_name || "Brak informacji",
             };
           }),
@@ -88,7 +93,10 @@ export default function Home() {
       if (!acc[showing.date]) {
         acc[showing.date] = [];
       }
-      acc[showing.date].push(showing);
+      // Sort showings by time within each date
+      acc[showing.date].push(showing); 
+      acc[showing.date].sort((a, b) => a.time.localeCompare(b.time));
+
       return acc;
     }, {} as Record<string, Showing[]>);
   };
@@ -150,6 +158,7 @@ export default function Home() {
                           <p className="font-bold text-xl text-blue-500">{showing.time}</p>
                           <div className="text-sm font-medium text-gray-600 dark:text-gray-400 mt-1">
                             <p>{showing.screen}</p>
+                            <p>{showing.cinemaName}</p>
                           </div>
                         </div>
                       ))}
@@ -167,7 +176,7 @@ export default function Home() {
   return (
     <main className="min-h-screen p-4 md:p-8 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
       <div className="max-w-6xl mx-auto">
-        <h1 className="text-4xl font-bold mb-8 text-center text-blue-600 dark:text-blue-400">Repertuar Multikina</h1>
+        <h1 className="text-4xl font-bold mb-8 text-center text-blue-600 dark:text-blue-400">Repertuar</h1>
         
         {films.length === 0 ? (
           <p className="text-center text-lg">Brak seansów do wyświetlenia.</p>
