@@ -158,8 +158,8 @@ export default function Home() {
           
           (movie.screenings || []).forEach((screening) => {
             const dateObj = new Date(screening.start_time);
-            const dateKey = dateObj.toLocaleDateString("pl-PL");
-            const timeKey = dateObj.toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" });
+            const dateKey = dateObj.toLocaleDateString("pl-PL", { timeZone: "Europe/Warsaw" });
+            const timeKey = dateObj.toLocaleTimeString("pl-PL", { timeZone: "Europe/Warsaw", hour: "2-digit", minute: "2-digit" });
             
             if (!showingsByDate[dateKey]) showingsByDate[dateKey] = [];
             

@@ -5,6 +5,7 @@ from curl_cffi import requests
 from supabase import create_client, Client
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 # Załadowanie zmiennych środowiskowych
 load_dotenv()
@@ -119,7 +120,7 @@ async def scrape_cinema_city_poznan():
 
                     movies_to_upsert = {}
                     for film in films_api_list:
-                        title = film.get("name")
+                        title = film.get("name").strip()
                         if title and title not in movies_cache and title not in movies_to_upsert:
                             attribute_ids = film.get("attributeIds", [])
                             type_mapping = {
@@ -153,11 +154,19 @@ async def scrape_cinema_city_poznan():
                     new_screenings = {}
                     for event in events_api_list:
                         api_film_id = event.get("filmId")
-                        start_time = event.get("eventDateTime")
+                        start_time_raw = event.get("eventDateTime")
                         room_name = event.get("auditorium")
 
-                        if not api_film_id or not start_time:
+                        if not api_film_id or not start_time_raw:
                             continue
+
+                        try:
+                            # Zamiana "2026-04-20T20:30:00" na obiekt daty z polską strefą czasową
+                            dt_obj = datetime.fromisoformat(start_time_raw)
+                            dt_aware = dt_obj.replace(tzinfo=ZoneInfo("Europe/Warsaw"))
+                            start_time = dt_aware.isoformat()
+                        except ValueError:
+                            start_time = start_time_raw
 
                         db_movie_id = film_id_map.get(api_film_id)
                         if not db_movie_id:

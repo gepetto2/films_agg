@@ -4,6 +4,8 @@ import json
 from curl_cffi import requests
 from supabase import create_client, Client
 from dotenv import load_dotenv
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 # Załadowanie zmiennych z pliku .env do środowiska
 load_dotenv()
@@ -57,7 +59,7 @@ async def scrape_and_save():
             print(f"Pobrano {len(films_list)} filmów. Zapisywanie do bazy...")
 
             for film in films_list:
-                title = film.get("filmTitle")
+                title = film.get("filmTitle").strip()
                 if not title:
                     continue
                     
@@ -82,13 +84,20 @@ async def scrape_and_save():
                         if not start_time_raw:
                             continue
                             
+                        try:
+                            dt_obj = datetime.fromisoformat(start_time_raw)
+                            dt_aware = dt_obj.replace(tzinfo=ZoneInfo("Europe/Warsaw"))
+                            start_time = dt_aware.isoformat()
+                        except ValueError:
+                            start_time = start_time_raw
+                            
                         screen_name = session.get("screenName", "")
                         
                         # Sprawdzenie czy ten konkretny seans już istnieje (zapobieganie duplikatom)
                         existing_screening = supabase.table("screenings").select("id").match({
                             "movie_id": movie_id,
                             "cinema_id": cinema_id,
-                            "start_time": start_time_raw,
+                            "start_time": start_time,
                             "room_name": screen_name
                         }).execute()
                         
@@ -96,7 +105,7 @@ async def scrape_and_save():
                             supabase.table("screenings").insert({
                                 "movie_id": movie_id,
                                 "cinema_id": cinema_id,
-                                "start_time": start_time_raw,
+                                "start_time": start_time,
                                 "room_name": screen_name
                             }).execute()
                             
