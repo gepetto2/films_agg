@@ -47,7 +47,7 @@ async def scrape_and_save():
                 return
                 
             # KROK 3: Sprawdzenie / Dodanie kina (0011)
-            cinema_name = "Poznań Stary Browar" # Możesz dostosować nazwę wg potrzeb
+            cinema_name = "Multikino Poznań Stary Browar" # Możesz dostosować nazwę wg potrzeb
             cinema_res = supabase.table("cinemas").select("id").eq("name", cinema_name).execute()
             if not cinema_res.data:
                 cinema_res = supabase.table("cinemas").insert({"name": cinema_name, "city": "Poznań"}).execute()
