@@ -121,10 +121,28 @@ async def scrape_cinema_city_poznan():
                         if not title:
                             continue
 
+                        # Sprawdzenie czy film ma atrybut marathon lub special-event
+                        attribute_ids = film.get("attributeIds", [])
+                        if "marathon" in attribute_ids:
+                            movie_type = "MARATON"
+                        elif "music-event" in attribute_ids:
+                            movie_type = "MUZYKA"
+                        elif "sport-event" in attribute_ids:
+                            movie_type = "SPORT"
+                        elif "dubbed-lang-uk" in attribute_ids:
+                            movie_type = "UKRAIŃSKI DUBBING"
+                        elif "special-event" in attribute_ids:
+                            movie_type = "special-event"
+                        else:
+                            movie_type = None
+
                         movie_res = supabase.table("movies").select("id").eq("title", title).execute()
 
                         if not movie_res.data:
-                            movie_res = supabase.table("movies").insert({"title": title}).execute()
+                            movie_res = supabase.table("movies").insert({
+                                "title": title,
+                                "movie_type": movie_type
+                            }).execute()
 
                         db_movie_id = movie_res.data[0]["id"]
                         film_id_map[api_film_id] = db_movie_id

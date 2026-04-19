@@ -5,7 +5,6 @@ import { createClient } from "@supabase/supabase-js";
 
 type Showing = {
   time: string;
-  screen: string;
   cinemaName: string;
   franchise: string;
 };
@@ -102,7 +101,6 @@ function FilmCard({ film }: { film: Film }) {
                             {showing.time}
                           </p>
                           <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mt-1">
-                            <p>{showing.screen}</p>
                             <p>{showing.cinemaName}</p>
                           </div>
                         </div>
@@ -135,7 +133,6 @@ export default function Home() {
             movie_type,
             screenings (
               start_time,
-              room_name,
               cinemas (
                 name,
                 franchise
@@ -159,7 +156,6 @@ export default function Home() {
             showingsByDate[dateKey].push({
               time: timeKey,
               cinemaName: screening.cinemas?.name ?? "Brak informacji",
-              screen: screening.room_name || "Brak informacji",
               franchise: screening.cinemas?.franchise ?? "Nieznane",
             });
           });
@@ -175,6 +171,9 @@ export default function Home() {
             showingsByDate,
           };
         });
+
+        // Sortowanie filmów alfabetycznie po tytule
+        formattedFilms.sort((a, b) => a.title.localeCompare(b.title, "pl-PL"));
 
         setFilms(formattedFilms);
       } catch (err: any) {
