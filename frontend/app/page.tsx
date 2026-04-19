@@ -7,6 +7,7 @@ type Showing = {
   time: string;
   screen: string;
   cinemaName: string;
+  franchise: string;
 };
 
 type Film = {
@@ -24,6 +25,7 @@ type RawMovieResponse = {
     room_name: string;
     cinemas: {
       name: string;
+      franchise: string | null;
     } | null;
   }[];
 };
@@ -31,6 +33,22 @@ type RawMovieResponse = {
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const supabase = createClient(supabaseUrl, supabaseKey);
+
+// Konfiguracja kolorów dla poszczególnych sieci kin
+const FRANCHISE_STYLES: Record<string, { card: string; text: string }> = {
+  "Multikino": {
+    card: "border-[rgb(226,0,122)] dark:border-[rgba(226,0,122,0.8)] bg-[rgba(226,0,122,0.1)] dark:bg-[rgba(226,0,122,0.2)]",
+    text: "text-[rgb(226,0,122)] dark:text-[rgba(226,0,122,0.8)]",
+  },
+  "Cinema City": {
+    card: "border-[rgb(245,130,30)] dark:border-[rgba(245,130,30,0.8)] bg-[rgba(245,130,30,0.1)] dark:bg-[rgba(245,130,30,0.2)]",
+    text: "text-[rgb(245,130,30)] dark:text-[rgba(245,130,30,0.8)]",
+  },
+  "default": {
+    card: "border-[#0088FF] dark:border-[#33A1FF] bg-[#0088FF]/10 dark:bg-[#0088FF]/20",
+    text: "text-[#0088FF] dark:text-[#33A1FF]",
+  },
+};
 
 function FilmCard({ film }: { film: Film }) {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -73,15 +91,23 @@ function FilmCard({ film }: { film: Film }) {
                 
                 {isDayExpanded && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 p-4 bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-700">
-                    {dailyShowings.map((showing, idx) => (
-                      <div key={idx} className="p-4 border border-gray-200 dark:border-gray-700 rounded-xl bg-gray-50 dark:bg-gray-800 hover:shadow-md transition">
-                        <p className="font-bold text-xl text-blue-500">{showing.time}</p>
-                        <div className="text-sm font-medium text-gray-600 dark:text-gray-400 mt-1">
-                          <p>{showing.screen}</p>
-                          <p>{showing.cinemaName}</p>
+                    {dailyShowings.map((showing, idx) => {
+                      const style = FRANCHISE_STYLES[showing.franchise] || FRANCHISE_STYLES["default"];
+                      return (
+                        <div 
+                          key={idx} 
+                          className={`p-4 border-2 rounded-xl hover:shadow-md transition ${style.card}`}
+                        >
+                          <p className={`font-bold text-xl ${style.text}`}>
+                            {showing.time}
+                          </p>
+                          <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mt-1">
+                            <p>{showing.screen}</p>
+                            <p>{showing.cinemaName}</p>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -111,7 +137,8 @@ export default function Home() {
               start_time,
               room_name,
               cinemas (
-                name
+                name,
+                franchise
               )
             )
           `);
@@ -132,7 +159,8 @@ export default function Home() {
             showingsByDate[dateKey].push({
               time: timeKey,
               cinemaName: screening.cinemas?.name ?? "Brak informacji",
-              screen: screening.room_name || "Brak informacji"
+              screen: screening.room_name || "Brak informacji",
+              franchise: screening.cinemas?.franchise ?? "Nieznane",
             });
           });
 
@@ -174,7 +202,7 @@ export default function Home() {
   return (
     <main className="min-h-screen p-4 md:p-8 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
       <div className="max-w-6xl mx-auto">
-        <h1 className="text-4xl font-bold mb-8 text-center text-blue-600 dark:text-blue-400">Repertuar Multikina</h1>
+        <h1 className="text-4xl font-bold mb-8 text-center text-blue-600 dark:text-blue-400">Repertuar kin</h1>
         
         {loading ? (
           <div className="flex justify-center items-center py-24 text-xl text-gray-700 dark:text-gray-200">Ładowanie repertuaru...</div>
