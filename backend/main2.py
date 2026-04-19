@@ -74,7 +74,7 @@ async def scrape_cinema_city_poznan():
                 # Sprawdzenie / Dodanie kina w Supabase
                 cinema_res = supabase.table("cinemas").select("id").eq("name", cinema_name).execute()
                 if not cinema_res.data:
-                    cinema_res = supabase.table("cinemas").insert({"name": "Cinema City " + cinema_name, "city": "Poznań", "franchise": "Cinema City"}).execute()
+                    cinema_res = supabase.table("cinemas").insert({"name": cinema_name, "city": "Poznań", "franchise": "Cinema City"}).execute()
                 db_cinema_id = cinema_res.data[0]["id"]
 
                 # Pobranie dostępnych dat
