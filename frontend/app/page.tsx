@@ -63,10 +63,10 @@ function FilmCard({ film }: { film: Film }) {
   };
 
   return (
-    <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
+    <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
       <button
         onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full flex justify-between items-center text-left focus:outline-none"
+        className="w-full flex justify-between items-center text-left focus:outline-none p-6 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
       >
         <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-100">{film.title}</h2>
         <span className="text-gray-400 dark:text-gray-500 text-xl ml-4">
@@ -75,7 +75,7 @@ function FilmCard({ film }: { film: Film }) {
       </button>
       
       {isExpanded && (
-        <div className="mt-6 space-y-4">
+        <div className="px-6 pb-6 space-y-4">
           {Object.entries(film.showingsByDate).map(([date, dailyShowings]) => {
             const isDayExpanded = expandedDays[date];
             return (

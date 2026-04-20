@@ -127,6 +127,7 @@ async def scrape_cinema_city_poznan():
                                 "marathon": "MARATON",
                                 "music-event": "MUZYKA",
                                 "sport-event": "SPORT",
+                                "sport": "SPORT",
                                 "dubbed-lang-uk": "UKRAIŃSKI DUBBING",
                                 "special-event": "WYDARZENIE SPECJALNE"
                             }

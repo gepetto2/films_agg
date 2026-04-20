@@ -71,6 +71,9 @@ async def scrape_and_save():
                     film_attrs = film.get("filmAttributes", [])
                     movie_type = (film_attrs[0].get("shortName") or film_attrs[0].get("name")) if film_attrs else None
 
+                    if movie_type:
+                        movie_type = movie_type.removesuffix(" - wydarzenie specjalne")
+
                     movie_res = supabase.table("movies").insert({
                         "title": title, 
                         "movie_type": movie_type if movie_type != "FAMILIJNY" else None
@@ -93,6 +96,13 @@ async def scrape_and_save():
                             
                         screen_name = session.get("screenName", "")
                         
+                        # Wyciągnięcie odpowiedniej wartości dla kolumny lang
+                        lang = None
+                        for attr in session.get("attributes", []):
+                            if attr.get("attributeType") == "Language":
+                                lang = attr.get("name")
+                                break
+                        
                         # Sprawdzenie czy ten konkretny seans już istnieje (zapobieganie duplikatom)
                         existing_screening = supabase.table("screenings").select("id").match({
                             "movie_id": movie_id,
@@ -106,7 +116,8 @@ async def scrape_and_save():
                                 "movie_id": movie_id,
                                 "cinema_id": cinema_id,
                                 "start_time": start_time,
-                                "room_name": screen_name
+                                "room_name": screen_name,
+                                "lang": lang
                             }).execute()
                             
             print("Zakończono zapisywanie danych!")
