@@ -58,29 +58,49 @@ async def scrape_and_save():
             films_list = data.get("result", []) if isinstance(data, dict) else []
             print(f"Pobrano {len(films_list)} filmów. Zapisywanie do bazy...")
 
+            # KROK 4: Zbieranie filmów do operacji Upsert
+            movies_to_upsert = {}
             for film in films_list:
                 title = film.get("filmTitle").strip()
                 if not title:
                     continue
                     
-                # Sprawdzenie / Dodanie filmu
-                movie_res = supabase.table("movies").select("id").eq("title", title).execute()
+                film_attrs = film.get("filmAttributes", [])
+                movie_type = (film_attrs[0].get("shortName") or film_attrs[0].get("name")) if film_attrs else None
+                if movie_type:
+                    movie_type = movie_type.removesuffix(" - wydarzenie specjalne")
+                    if movie_type == "FAMILIJNY":
+                        movie_type = None
 
-                if not movie_res.data:
-                    # Pobranie pierwszego atrybutu (shortName lub name)
-                    film_attrs = film.get("filmAttributes", [])
-                    movie_type = (film_attrs[0].get("shortName") or film_attrs[0].get("name")) if film_attrs else None
+                release_date = film.get("releaseDate")
+                release_year = release_date[:4] if release_date else None
 
-                    if movie_type:
-                        movie_type = movie_type.removesuffix(" - wydarzenie specjalne")
-
-                    movie_res = supabase.table("movies").insert({
-                        "title": title, 
-                        "movie_type": movie_type if movie_type != "FAMILIJNY" else None
-                    }).execute()
-
-                movie_id = movie_res.data[0]["id"]
+                movies_to_upsert[title] = {
+                    "title": title,
+                    "mk_movie_type": movie_type,
+                    "mk_length": film.get("runningTime"),
+                    "mk_poster": film.get("posterImageSrc"),
+                    "mk_release_year": release_year,
+                    "mk_description": film.get("synopsisShort"),
+                }
                 
+            movies_cache = {}
+            if movies_to_upsert:
+                movie_res = supabase.table("movies").upsert(
+                    list(movies_to_upsert.values()),
+                    on_conflict="title"
+                ).execute()
+                for m in movie_res.data:
+                    movies_cache[m["title"]] = m["id"]
+
+            # KROK 5: Zbieranie seansów do operacji Upsert
+            new_screenings = {}
+            for film in films_list:
+                title = film.get("filmTitle", "").strip()
+                movie_id = movies_cache.get(title)
+                if not movie_id:
+                    continue
+
                 for group in film.get("showingGroups", []):
                     for session in group.get("sessions", []):
                         start_time_raw = session.get("startTime", "")
@@ -95,6 +115,9 @@ async def scrape_and_save():
                             start_time = start_time_raw
                             
                         screen_name = session.get("screenName", "")
+                        booking_url = session.get("bookingUrl", "")
+                        if booking_url and not booking_url.startswith("http"):
+                            booking_url = f"https://www.multikino.pl{booking_url}"
                         
                         # Wyciągnięcie odpowiedniej wartości dla kolumny lang
                         lang = None
@@ -103,23 +126,24 @@ async def scrape_and_save():
                                 lang = attr.get("name")
                                 break
                         
-                        # Sprawdzenie czy ten konkretny seans już istnieje (zapobieganie duplikatom)
-                        existing_screening = supabase.table("screenings").select("id").match({
+                        screening_key = (movie_id, start_time, screen_name)
+                        new_screenings[screening_key] = {
                             "movie_id": movie_id,
                             "cinema_id": cinema_id,
                             "start_time": start_time,
-                            "room_name": screen_name
-                        }).execute()
-                        
-                        if not existing_screening.data:
-                            supabase.table("screenings").insert({
-                                "movie_id": movie_id,
-                                "cinema_id": cinema_id,
-                                "start_time": start_time,
-                                "room_name": screen_name,
-                                "lang": lang
-                            }).execute()
+                            "room_name": screen_name,
+                            "lang": lang,
+                            "booking_link": booking_url
+                        }
                             
+            if new_screenings:
+                supabase.table("screenings").upsert(
+                    list(new_screenings.values()),
+                    on_conflict="movie_id,cinema_id,start_time,room_name",
+                    ignore_duplicates=True
+                ).execute()
+                print(f"Zapisano {len(new_screenings)} seansów (upsert).")
+
             print("Zakończono zapisywanie danych!")
 
         except Exception as e:

@@ -133,7 +133,16 @@ async def scrape_cinema_city_poznan():
                             }
                             movie_type = next((val for key, val in type_mapping.items() if key in attribute_ids), None)
 
-                            movies_to_upsert[title] = {"title": title, "movie_type": movie_type}
+                            raw_release_year = film.get("releaseYear")
+                            release_year = str(raw_release_year).replace('/', ',').split(',')[0].strip() if raw_release_year else None
+
+                            movies_to_upsert[title] = {
+                                "title": title, 
+                                "cc_movie_type": movie_type,
+                                "cc_length": film.get("length"),
+                                "cc_poster": film.get("posterLink"),
+                                "cc_release_year": release_year
+                            }
                             
                     # Zbiorczy Upsert wszystkich nowych filmów na ten dzień
                     if movies_to_upsert:
@@ -179,6 +188,8 @@ async def scrape_cinema_city_poznan():
                             lang = "NAPISY"
                         elif "dubbed" in attribute_ids:
                             lang = "DUBBING"
+                        elif "original-lang-pl" in attribute_ids:
+                            lang = "PL"
 
                         screening_key = (db_movie_id, start_time, room_name)
                         new_screenings[screening_key] = {
@@ -186,7 +197,9 @@ async def scrape_cinema_city_poznan():
                             "cinema_id": db_cinema_id,
                             "start_time": start_time,
                             "room_name": room_name,
-                            "lang": lang
+                            "lang": lang,
+                            "booking_link": event.get("bookingLink"),
+                            "availability_ratio": event.get("availabilityRatio")
                         }
 
                     if new_screenings:
