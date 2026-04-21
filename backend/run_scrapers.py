@@ -18,15 +18,17 @@ except Exception as e:
 
 # Importujemy funkcje scrapujące z naszych plików
 from multikino import scrape_and_save as scrape_multikina
-from cinema_city import scrape_cinema_city_poznan as scrape_cinema_city
+from cinema_city import scrape_cinema_city
 
 async def run_all():
-    print("Rozpoczynamy pobieranie danych ze wszystkich kin...\n")
+    cities_to_scrape = ["Poznań", "Bydgoszcz"]
+    
+    print(f"Rozpoczynamy pobieranie danych ze wszystkich kin dla miast: {', '.join(cities_to_scrape)}...\n")
     
     # asyncio.gather uruchamia przekazane zadania współbieżnie (jednocześnie).
     await asyncio.gather(
-        scrape_multikina(supabase),
-        scrape_cinema_city(supabase)
+        scrape_multikina(supabase, cities_to_scrape),
+        scrape_cinema_city(supabase, cities_to_scrape)
     )
     print("\nWszystkie dane z Multikina i Cinema City zostały pomyślnie pobrane i zapisane!")
 

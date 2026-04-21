@@ -4,8 +4,8 @@ from curl_cffi import requests
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-async def get_poznan_cinemas(client: requests.AsyncSession) -> list:
-    """Pobiera listę kin Cinema City i filtruje te z Poznania."""
+async def get_target_cinemas(client: requests.AsyncSession, cities: list) -> list:
+    """Pobiera listę kin Cinema City i filtruje te z wybranych miast."""
     # Używamy daty daleko w przyszłości, aby mieć pewność, że dostaniemy wszystkie kina, które mają jakiekolwiek wydarzenia
     until_date = (datetime.now() + timedelta(days=365*2)).strftime("%Y-%m-%d")
     cinemas_url = f"https://www.cinema-city.pl/pl/data-api-service/v1/quickbook/10103/cinemas/with-event/until/{until_date}"
@@ -19,13 +19,13 @@ async def get_poznan_cinemas(client: requests.AsyncSession) -> list:
         data = response.json()
         all_cinemas = data.get("body", {}).get("cinemas", [])
 
-        poznan_cinemas = [
+        target_cinemas = [
             cinema for cinema in all_cinemas
-            if cinema.get("addressInfo", {}).get("city") == "Poznań"
+            if cinema.get("addressInfo", {}).get("city") in cities
         ]
 
-        print(f"Znaleziono {len(poznan_cinemas)} kin w Poznaniu.")
-        return poznan_cinemas
+        print(f"Znaleziono {len(target_cinemas)} kin dla miast: {', '.join(cities)}.")
+        return target_cinemas
 
     except requests.errors.RequestsError as e:
         print(f"Błąd HTTP podczas pobierania listy kin: {e}")
@@ -34,17 +34,17 @@ async def get_poznan_cinemas(client: requests.AsyncSession) -> list:
         print("Błąd dekodowania JSON z listy kin.")
         return []
 
-async def scrape_cinema_city_poznan(supabase):
+async def scrape_cinema_city(supabase, cities=["Poznań"]):
     async with requests.AsyncSession(impersonate="chrome") as client:
         try:
             # KROK 1: Inicjalizacja sesji i pobranie ciasteczek
             print("Nawiązywanie połączenia z Cinema City...")
             await client.get("https://www.cinema-city.pl/", timeout=60.0)
 
-            # KROK 2: Pobranie kin w Poznaniu
-            poznan_cinemas = await get_poznan_cinemas(client)
-            if not poznan_cinemas:
-                print("Nie znaleziono kin w Poznaniu lub wystąpił błąd. Zakończono.")
+            # KROK 2: Pobranie kin
+            target_cinemas = await get_target_cinemas(client, cities)
+            if not target_cinemas:
+                print("Nie znaleziono kin lub wystąpił błąd. Zakończono.")
                 return
 
             movies_cache = {}  # Pamięć podręczna dla pobranych/dodanych filmów z bazy
@@ -54,19 +54,20 @@ async def scrape_cinema_city_poznan(supabase):
             existing_db_movies = {m["title"]: m for m in all_movies_res.data}
 
             # KROK 3: Iteracja po znalezionych kinach
-            for cinema in poznan_cinemas:
+            for cinema in target_cinemas:
                 cinema_id_api = cinema.get("id")
                 cinema_name = cinema.get("displayName")
+                cinema_city = cinema.get("addressInfo", {}).get("city")
 
                 if not cinema_id_api or not cinema_name:
                     continue
 
                 print(f"\n--- Rozpoczynam scraping dla: {cinema_name} (ID: {cinema_id_api}) ---")
 
-                # Upsert kina w Supabase (wymaga nałożonego UNIQUE na kolumnie 'name')
+                # Upsert kina w Supabase (wymaga nałożonego UNIQUE na kolumnach 'name, franchise')
                 cinema_res = supabase.table("cinemas").upsert(
-                    {"name": cinema_name, "city": "Poznań", "franchise": "Cinema City"},
-                    on_conflict="name"
+                    {"name": cinema_name, "city": cinema_city, "franchise": "Cinema City"},
+                    on_conflict="name,franchise"
                 ).execute()
                 db_cinema_id = cinema_res.data[0]["id"]
 
@@ -220,7 +221,7 @@ async def scrape_cinema_city_poznan(supabase):
 
                     await asyncio.sleep(0.5)
 
-            print("\nZakończono zapisywanie danych z Cinema City dla kin w Poznaniu!")
+            print(f"\nZakończono zapisywanie danych z Cinema City dla miast: {', '.join(cities)}!")
 
         except Exception as e:
             print(f"Wystąpił błąd w trakcie scrapowania: {str(e)}")

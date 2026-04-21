@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 type Showing = {
   time: string;
   cinemaName: string;
   franchise: string;
+  city: string;
   lang: string | null;
   bookingLink: string | null;
   availabilityRatio: number | null;
@@ -36,6 +37,7 @@ type RawMovieResponse = {
     availability_ratio: number | null;
     cinemas: {
       name: string;
+      city: string;
       franchise: string | null;
     } | null;
   }[];
@@ -176,6 +178,7 @@ export default function Home() {
   const [films, setFilms] = useState<Film[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedCity, setSelectedCity] = useState<string>("Wszystkie");
 
   useEffect(() => {
     const fetchFilms = async () => {
@@ -196,6 +199,7 @@ export default function Home() {
               availability_ratio,
               cinemas (
                 name,
+                city,
                 franchise
               )
             )
@@ -217,6 +221,7 @@ export default function Home() {
             showingsByDate[dateKey].push({
               time: timeKey,
               cinemaName: screening.cinemas?.name ?? "Brak informacji",
+              city: screening.cinemas?.city ?? "Nieznane",
               franchise: screening.cinemas?.franchise ?? "Nieznane",
               lang: screening.lang ?? null,
               bookingLink: screening.booking_link ?? null,
@@ -253,8 +258,44 @@ export default function Home() {
     fetchFilms();
   }, []);
 
-  const regularFilms = films.filter((f) => !f.movieType);
-  const specialFilms = films.filter((f) => f.movieType);
+  const availableCities = useMemo(() => {
+    const cities = new Set<string>();
+    films.forEach((film) => {
+      Object.values(film.showingsByDate).forEach((showings) => {
+        showings.forEach((showing) => {
+          if (showing.city && showing.city !== "Nieznane") {
+            cities.add(showing.city);
+          }
+        });
+      });
+    });
+    return Array.from(cities).sort((a, b) => a.localeCompare(b, "pl-PL"));
+  }, [films]);
+
+  const filteredFilms = useMemo(() => {
+    if (selectedCity === "Wszystkie") return films;
+
+    return films.map((film) => {
+      const filteredShowingsByDate: Record<string, Showing[]> = {};
+      let hasAnyShowings = false;
+
+      Object.entries(film.showingsByDate).forEach(([date, showings]) => {
+        const cityShowings = showings.filter((s) => s.city === selectedCity);
+        if (cityShowings.length > 0) {
+          filteredShowingsByDate[date] = cityShowings;
+          hasAnyShowings = true;
+        }
+      });
+
+      // Zwracamy film tylko wtedy, kiedy ma jakiekolwiek seanse w danym mieście
+      if (!hasAnyShowings) return null;
+
+      return { ...film, showingsByDate: filteredShowingsByDate };
+    }).filter((film): film is Film => film !== null);
+  }, [films, selectedCity]);
+
+  const regularFilms = filteredFilms.filter((f) => !f.movieType);
+  const specialFilms = filteredFilms.filter((f) => f.movieType);
 
   const specialEventsGrouped = specialFilms.reduce((acc, film) => {
     const type = film.movieType!;
@@ -278,6 +319,34 @@ export default function Home() {
           <p className="text-center text-lg py-24">Brak seansów do wyświetlenia.</p>
         ) : (
           <>
+            {availableCities.length > 0 && (
+              <div className="flex justify-start mb-8">
+                <div className="relative inline-flex items-center bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
+                  <label htmlFor="cityFilter" className="pl-4 pr-2 text-sm font-medium text-gray-500 dark:text-gray-400">
+                    Miasto:
+                  </label>
+                  <select
+                    id="cityFilter"
+                    value={selectedCity}
+                    onChange={(e) => setSelectedCity(e.target.value)}
+                    className="pl-2 pr-8 py-2.5 bg-transparent text-gray-800 dark:text-gray-200 font-semibold focus:outline-none cursor-pointer appearance-none"
+                  >
+                    <option className="bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" value="Wszystkie">
+                      Wszystkie
+                    </option>
+                    {availableCities.map((city) => (
+                      <option className="bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" key={city} value={city}>
+                        {city}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-gray-700 dark:text-gray-300">
+                    <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {regularFilms.length > 0 && (
               <div className="space-y-8">
                 {regularFilms.map(film => <FilmCard key={film.title} film={film} />)}
