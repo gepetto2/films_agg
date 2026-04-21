@@ -1,27 +1,9 @@
-import os
-import asyncio
 import json
 from curl_cffi import requests
-from supabase import create_client, Client
-from dotenv import load_dotenv
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-# Załadowanie zmiennych z pliku .env do środowiska
-load_dotenv()
-
-# Ustawienia Supabase (najlepiej ustawić jako zmienne środowiskowe)
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "twoj-url-z-supabase")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "twoj-klucz-z-supabase")
-
-# Inicjalizacja klienta Supabase
-try:
-    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-except Exception as e:
-    print(f"Błąd inicjalizacji klienta Supabase: {e}")
-    exit(1)
-
-async def scrape_and_save():
+async def scrape_and_save(supabase):
     target_url = "https://www.multikino.pl/api/microservice/showings/cinemas/0011/films"
     
     # Używamy curl_cffi z proxy, co pozwala nam zachować sesję (ciasteczka) i sygnaturę Chrome
@@ -57,6 +39,10 @@ async def scrape_and_save():
 
             films_list = data.get("result", []) if isinstance(data, dict) else []
             print(f"Pobrano {len(films_list)} filmów. Zapisywanie do bazy...")
+            
+            print("Pobieranie istniejących filmów z bazy (do weryfikacji daty premiery, plakatów i typu filmu)...")
+            all_movies_res = supabase.table("movies").select("title, release_year, poster, movie_type").execute()
+            existing_db_movies = {m["title"]: m for m in all_movies_res.data}
 
             # KROK 4: Zbieranie filmów do operacji Upsert
             movies_to_upsert = {}
@@ -72,15 +58,32 @@ async def scrape_and_save():
                     if movie_type == "FAMILIJNY":
                         movie_type = None
 
+                existing_movie = existing_db_movies.get(title, {})
+                if not movie_type:
+                    movie_type = existing_movie.get("movie_type")
+
                 release_date = film.get("releaseDate")
                 release_year = release_date[:4] if release_date else None
+                
+                existing_year = existing_movie.get("release_year")
+                if existing_year and release_year:
+                    release_year = str(min(int(existing_year), int(release_year))) if str(existing_year).isdigit() and str(release_year).isdigit() else str(min(str(existing_year), str(release_year)))
+                elif existing_year:
+                    release_year = existing_year
+                    
+                existing_movie["release_year"] = release_year
+                
+                mk_poster = film.get("posterImageSrc")
+                poster = mk_poster if mk_poster else existing_movie.get("poster")
+                existing_movie["poster"] = poster
+                existing_db_movies[title] = existing_movie
 
                 movies_to_upsert[title] = {
                     "title": title,
-                    "mk_movie_type": movie_type,
-                    "mk_length": film.get("runningTime"),
-                    "mk_poster": film.get("posterImageSrc"),
-                    "mk_release_year": release_year,
+                    "movie_type": movie_type,
+                    "length": film.get("runningTime") if film.get("runningTime") > 0 else None,
+                    "poster": poster,
+                    "release_year": release_year,
                     "mk_description": film.get("synopsisShort"),
                 }
                 
@@ -109,8 +112,9 @@ async def scrape_and_save():
                             
                         try:
                             dt_obj = datetime.fromisoformat(start_time_raw)
-                            dt_aware = dt_obj.replace(tzinfo=ZoneInfo("Europe/Warsaw"))
-                            start_time = dt_aware.isoformat()
+                            if dt_obj.tzinfo is None:
+                                dt_obj = dt_obj.replace(tzinfo=ZoneInfo("Europe/Warsaw"))
+                            start_time = dt_obj.isoformat()
                         except ValueError:
                             start_time = start_time_raw
                             
@@ -150,4 +154,4 @@ async def scrape_and_save():
             print(f"Wystąpił błąd: {str(e)}")
 
 if __name__ == "__main__":
-    asyncio.run(scrape_and_save())
+    print("Skrypt uruchom poprzez plik run_scrapers.py")

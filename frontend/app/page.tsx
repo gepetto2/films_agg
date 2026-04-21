@@ -8,11 +8,16 @@ type Showing = {
   cinemaName: string;
   franchise: string;
   lang: string | null;
+  bookingLink: string | null;
+  availabilityRatio: number | null;
 };
 
 type Film = {
   title: string;
   movieType: string | null;
+  poster: string | null;
+  length: number | null;
+  releaseYear: string | null;
   showingsByDate: Record<string, Showing[]>;
 };
 
@@ -20,10 +25,15 @@ type Film = {
 type RawMovieResponse = {
   title: string;
   movie_type: string | null;
+  poster: string | null;
+  length: number | null;
+  release_year: string | null;
   screenings: {
     start_time: string;
     room_name: string;
     lang: string | null;
+    booking_link: string | null;
+    availability_ratio: number | null;
     cinemas: {
       name: string;
       franchise: string | null;
@@ -62,13 +72,33 @@ function FilmCard({ film }: { film: Film }) {
     }));
   };
 
+  const formatLength = (mins: number) => {
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    if (h > 0 && m > 0) return `${h}h ${m}min`;
+    if (h > 0) return `${h}h`;
+    return `${m}min`;
+  };
+
   return (
     <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
       <button
         onClick={() => setIsExpanded(!isExpanded)}
         className="w-full flex justify-between items-center text-left focus:outline-none p-6 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
       >
-        <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-100">{film.title}</h2>
+        <div className="flex items-center gap-4">
+          {film.poster && (
+            <img src={film.poster} alt="" aria-hidden="true" className="w-12 sm:w-16 object-cover rounded shadow-sm shrink-0" />
+          )}
+          <div>
+            <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-100">{film.title}</h2>
+            {(film.releaseYear || film.length) && (
+              <div className="text-sm text-gray-500 dark:text-gray-400 mt-1 font-medium">
+                {film.releaseYear}{film.releaseYear && film.length ? " • " : ""}{film.length ? formatLength(film.length) : ""}
+              </div>
+            )}
+          </div>
+        </div>
         <span className="text-gray-400 dark:text-gray-500 text-xl ml-4">
           {isExpanded ? "▲" : "▼"}
         </span>
@@ -94,11 +124,8 @@ function FilmCard({ film }: { film: Film }) {
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 p-4 bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-700">
                     {dailyShowings.map((showing, idx) => {
                       const style = FRANCHISE_STYLES[showing.franchise] || FRANCHISE_STYLES["default"];
-                      return (
-                        <div 
-                          key={idx} 
-                          className={`p-4 border-2 rounded-xl hover:shadow-md transition flex flex-col justify-between ${style.card}`}
-                        >
+                      const cardContent = (
+                        <>
                           <div className="flex justify-between items-start">
                             <p className={`font-bold text-xl ${style.text}`}>
                               {showing.time}
@@ -109,9 +136,28 @@ function FilmCard({ film }: { film: Film }) {
                               </span>
                             )}
                           </div>
-                          <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mt-2">
+                          <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mt-2 flex justify-between items-end">
                             <p>{showing.cinemaName}</p>
+                            {showing.availabilityRatio !== null && (
+                              <span className="text-xs opacity-75 font-semibold" title="Dostępność miejsc">
+                                {Math.round(showing.availabilityRatio * 100)}% dost
+                              </span>
+                            )}
                           </div>
+                        </>
+                      );
+
+                      if (showing.bookingLink) {
+                        return (
+                          <a key={idx} href={showing.bookingLink} target="_blank" rel="noopener noreferrer" className={`p-4 border-2 rounded-xl hover:shadow-md transition flex flex-col justify-between ${style.card} cursor-pointer hover:-translate-y-1 block`}>
+                            {cardContent}
+                          </a>
+                        );
+                      }
+
+                      return (
+                        <div key={idx} className={`p-4 border-2 rounded-xl hover:shadow-md transition flex flex-col justify-between ${style.card}`}>
+                          {cardContent}
                         </div>
                       );
                     })}
@@ -140,9 +186,14 @@ export default function Home() {
           .select<any, RawMovieResponse>(`
             title,
             movie_type,
+            poster,
+            length,
+            release_year,
             screenings (
               start_time,
               lang,
+              booking_link,
+              availability_ratio,
               cinemas (
                 name,
                 franchise
@@ -168,6 +219,8 @@ export default function Home() {
               cinemaName: screening.cinemas?.name ?? "Brak informacji",
               franchise: screening.cinemas?.franchise ?? "Nieznane",
               lang: screening.lang ?? null,
+              bookingLink: screening.booking_link ?? null,
+              availabilityRatio: screening.availability_ratio ?? null,
             });
           });
 
@@ -179,6 +232,9 @@ export default function Home() {
           return {
             title: movie.title,
             movieType: movie.movie_type,
+            poster: movie.poster,
+            length: movie.length,
+            releaseYear: movie.release_year,
             showingsByDate,
           };
         });

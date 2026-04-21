@@ -1,23 +1,8 @@
-import os
 import asyncio
 import json
 from curl_cffi import requests
-from supabase import create_client, Client
-from dotenv import load_dotenv
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-
-# Załadowanie zmiennych środowiskowych
-load_dotenv()
-
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "twoj-url-z-supabase")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "twoj-klucz-z-supabase")
-
-try:
-    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-except Exception as e:
-    print(f"Błąd inicjalizacji klienta Supabase: {e}")
-    exit(1)
 
 async def get_poznan_cinemas(client: requests.AsyncSession) -> list:
     """Pobiera listę kin Cinema City i filtruje te z Poznania."""
@@ -49,7 +34,7 @@ async def get_poznan_cinemas(client: requests.AsyncSession) -> list:
         print("Błąd dekodowania JSON z listy kin.")
         return []
 
-async def scrape_cinema_city_poznan():
+async def scrape_cinema_city_poznan(supabase):
     async with requests.AsyncSession(impersonate="chrome") as client:
         try:
             # KROK 1: Inicjalizacja sesji i pobranie ciasteczek
@@ -63,6 +48,10 @@ async def scrape_cinema_city_poznan():
                 return
 
             movies_cache = {}  # Pamięć podręczna dla pobranych/dodanych filmów z bazy
+            
+            print("Pobieranie istniejących filmów z bazy (do weryfikacji daty premiery, plakatów i typu filmu)...")
+            all_movies_res = supabase.table("movies").select("title, release_year, poster, movie_type").execute()
+            existing_db_movies = {m["title"]: m for m in all_movies_res.data}
 
             # KROK 3: Iteracja po znalezionych kinach
             for cinema in poznan_cinemas:
@@ -133,15 +122,32 @@ async def scrape_cinema_city_poznan():
                             }
                             movie_type = next((val for key, val in type_mapping.items() if key in attribute_ids), None)
 
+                            existing_movie = existing_db_movies.get(title, {})
+                            if not movie_type:
+                                movie_type = existing_movie.get("movie_type")
+
                             raw_release_year = film.get("releaseYear")
                             release_year = str(raw_release_year).replace('/', ',').split(',')[0].strip() if raw_release_year else None
+                            
+                            existing_year = existing_movie.get("release_year")
+                            if existing_year and release_year:
+                                release_year = str(min(int(existing_year), int(release_year))) if str(existing_year).isdigit() and str(release_year).isdigit() else str(min(str(existing_year), str(release_year)))
+                            elif existing_year:
+                                release_year = existing_year
+                                
+                            existing_movie["release_year"] = release_year
+                            
+                            cc_poster = film.get("posterLink")
+                            poster = existing_movie.get("poster") if existing_movie.get("poster") else cc_poster
+                            existing_movie["poster"] = poster
+                            existing_db_movies[title] = existing_movie
 
                             movies_to_upsert[title] = {
                                 "title": title, 
-                                "cc_movie_type": movie_type,
-                                "cc_length": film.get("length"),
-                                "cc_poster": film.get("posterLink"),
-                                "cc_release_year": release_year
+                                "movie_type": movie_type,
+                                "length": film.get("length"),
+                                "poster": poster,
+                                "release_year": release_year
                             }
                             
                     # Zbiorczy Upsert wszystkich nowych filmów na ten dzień
@@ -171,10 +177,11 @@ async def scrape_cinema_city_poznan():
                             continue
 
                         try:
-                            # Zamiana "2026-04-20T20:30:00" na obiekt daty z polską strefą czasową
+                            # Zamiana na obiekt daty z polską strefą czasową (zabezpieczenie przed nadpisaniem)
                             dt_obj = datetime.fromisoformat(start_time_raw)
-                            dt_aware = dt_obj.replace(tzinfo=ZoneInfo("Europe/Warsaw"))
-                            start_time = dt_aware.isoformat()
+                            if dt_obj.tzinfo is None:
+                                dt_obj = dt_obj.replace(tzinfo=ZoneInfo("Europe/Warsaw"))
+                            start_time = dt_obj.isoformat()
                         except ValueError:
                             start_time = start_time_raw
 
@@ -219,4 +226,4 @@ async def scrape_cinema_city_poznan():
             print(f"Wystąpił błąd w trakcie scrapowania: {str(e)}")
 
 if __name__ == "__main__":
-    asyncio.run(scrape_cinema_city_poznan())
+    print("Skrypt uruchom poprzez plik run_scrapers.py")
