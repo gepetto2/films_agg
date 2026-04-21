@@ -106,6 +106,15 @@ async def scrape_and_save(supabase, cities=["Poznań"]):
                         if movie_type == "FAMILIJNY":
                             movie_type = None
 
+                    # Sprawdzenie, czy któryś z seansów ma atrybut "KULTOWE KINO"
+                    if any(
+                        attr.get("name") == "KULTOWE KINO"
+                        for group in film.get("showingGroups", [])
+                        for session in group.get("sessions", [])
+                        for attr in session.get("attributes", [])
+                    ):
+                        movie_type = "KULTOWE"
+
                     existing_movie = existing_db_movies.get(title, {})
                     if not movie_type:
                         movie_type = existing_movie.get("movie_type")
@@ -177,13 +186,14 @@ async def scrape_and_save(supabase, cities=["Poznań"]):
                                     lang = attr.get("name")
                                     break
                             
+                            
                             screening_key = (movie_id, start_time, screen_name)
                             new_screenings[screening_key] = {
                                 "movie_id": movie_id,
                                 "cinema_id": db_cinema_id,
                                 "start_time": start_time,
                                 "room_name": screen_name,
-                                "lang": lang,
+                                "lang": "PL" if lang=="POLSKI" else lang,
                                 "booking_link": booking_url
                             }
                                 
