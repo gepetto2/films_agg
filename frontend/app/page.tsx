@@ -211,7 +211,13 @@ export default function Home() {
           // Optymalizacja: Grupowanie seansów po datach przy budowie stanu a nie podczas renderowania komponentu
           const showingsByDate: Record<string, Showing[]> = {};
           
-          (movie.screenings || []).forEach((screening) => {
+          // Sortujemy oryginalne wartości start_time (timestamptz) chronologicznie.
+          // Dzięki temu JS zachowa naturalną kolejność dodawania kluczy obiektów i kolejność godzin.
+          const sortedScreenings = [...(movie.screenings || [])].sort(
+            (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
+          );
+
+          sortedScreenings.forEach((screening) => {
             const dateObj = new Date(screening.start_time);
             const dateKey = dateObj.toLocaleDateString("pl-PL", { timeZone: "Europe/Warsaw" });
             const timeKey = dateObj.toLocaleTimeString("pl-PL", { timeZone: "Europe/Warsaw", hour: "2-digit", minute: "2-digit" });
@@ -227,11 +233,6 @@ export default function Home() {
               bookingLink: screening.booking_link ?? null,
               availabilityRatio: screening.availability_ratio ?? null,
             });
-          });
-
-          // Sortowanie seansów czasowo w obrębie danego dnia (tylko raz)
-          Object.values(showingsByDate).forEach((showings) => {
-            showings.sort((a, b) => a.time.localeCompare(b.time));
           });
 
           return {
