@@ -43,9 +43,10 @@ type RawMovieResponse = {
   }[];
 };
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-const supabase = createClient(supabaseUrl, supabaseKey);
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL || "",
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
+);
 
 // Konfiguracja kolorów dla poszczególnych sieci kin
 const FRANCHISE_STYLES: Record<string, { card: string; text: string }> = {
@@ -77,9 +78,7 @@ function FilmCard({ film }: { film: Film }) {
   const formatLength = (mins: number) => {
     const h = Math.floor(mins / 60);
     const m = mins % 60;
-    if (h > 0 && m > 0) return `${h}h ${m}min`;
-    if (h > 0) return `${h}h`;
-    return `${m}min`;
+    return h > 0 ? (m > 0 ? `${h}h ${m}min` : `${h}h`) : `${m}min`;
   };
 
   return (
@@ -126,8 +125,17 @@ function FilmCard({ film }: { film: Film }) {
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 p-4 bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-700">
                     {dailyShowings.map((showing, idx) => {
                       const style = FRANCHISE_STYLES[showing.franchise] || FRANCHISE_STYLES["default"];
-                      const cardContent = (
-                        <>
+
+                      const Wrapper = showing.bookingLink ? "a" : "div";
+                      const wrapperProps = showing.bookingLink 
+                        ? { href: showing.bookingLink, target: "_blank", rel: "noopener noreferrer" } 
+                        : {};
+                      const hoverStyles = showing.bookingLink 
+                        ? "cursor-pointer hover:-translate-y-1 block" 
+                        : "";
+
+                      return (
+                        <Wrapper key={idx} {...wrapperProps} className={`p-4 border-2 rounded-xl hover:shadow-md transition flex flex-col justify-between ${style.card} ${hoverStyles}`}>
                           <div className="flex justify-between items-start">
                             <p className={`font-bold text-xl ${style.text}`}>
                               {showing.time}
@@ -146,21 +154,7 @@ function FilmCard({ film }: { film: Film }) {
                               </span>
                             )}
                           </div>
-                        </>
-                      );
-
-                      if (showing.bookingLink) {
-                        return (
-                          <a key={idx} href={showing.bookingLink} target="_blank" rel="noopener noreferrer" className={`p-4 border-2 rounded-xl hover:shadow-md transition flex flex-col justify-between ${style.card} cursor-pointer hover:-translate-y-1 block`}>
-                            {cardContent}
-                          </a>
-                        );
-                      }
-
-                      return (
-                        <div key={idx} className={`p-4 border-2 rounded-xl hover:shadow-md transition flex flex-col justify-between ${style.card}`}>
-                          {cardContent}
-                        </div>
+                        </Wrapper>
                       );
                     })}
                   </div>
@@ -222,16 +216,16 @@ export default function Home() {
             const dateKey = dateObj.toLocaleDateString("pl-PL", { timeZone: "Europe/Warsaw" });
             const timeKey = dateObj.toLocaleTimeString("pl-PL", { timeZone: "Europe/Warsaw", hour: "2-digit", minute: "2-digit" });
             
-            if (!showingsByDate[dateKey]) showingsByDate[dateKey] = [];
+            showingsByDate[dateKey] ??= [];
             
             showingsByDate[dateKey].push({
               time: timeKey,
-              cinemaName: screening.cinemas?.name ?? "Brak informacji",
-              city: screening.cinemas?.city ?? "Nieznane",
-              franchise: screening.cinemas?.franchise ?? "Nieznane",
-              lang: screening.lang ?? null,
-              bookingLink: screening.booking_link ?? null,
-              availabilityRatio: screening.availability_ratio ?? null,
+              cinemaName: screening.cinemas?.name || "Brak informacji",
+              city: screening.cinemas?.city || "Nieznane",
+              franchise: screening.cinemas?.franchise || "Nieznane",
+              lang: screening.lang,
+              bookingLink: screening.booking_link,
+              availabilityRatio: screening.availability_ratio,
             });
           });
 
@@ -262,12 +256,10 @@ export default function Home() {
   const availableCities = useMemo(() => {
     const cities = new Set<string>();
     films.forEach((film) => {
-      Object.values(film.showingsByDate).forEach((showings) => {
-        showings.forEach((showing) => {
-          if (showing.city && showing.city !== "Nieznane") {
-            cities.add(showing.city);
-          }
-        });
+      Object.values(film.showingsByDate).flat().forEach((showing) => {
+        if (showing.city && showing.city !== "Nieznane") {
+          cities.add(showing.city);
+        }
       });
     });
     return Array.from(cities).sort((a, b) => a.localeCompare(b, "pl-PL"));
@@ -276,7 +268,7 @@ export default function Home() {
   const filteredFilms = useMemo(() => {
     if (selectedCity === "Wszystkie") return films;
 
-    return films.map((film) => {
+    return films.reduce<Film[]>((acc, film) => {
       const filteredShowingsByDate: Record<string, Showing[]> = {};
       let hasAnyShowings = false;
 
@@ -288,24 +280,23 @@ export default function Home() {
         }
       });
 
-      // Zwracamy film tylko wtedy, kiedy ma jakiekolwiek seanse w danym mieście
-      if (!hasAnyShowings) return null;
-
-      return { ...film, showingsByDate: filteredShowingsByDate };
-    }).filter((film): film is Film => film !== null);
+      if (hasAnyShowings) acc.push({ ...film, showingsByDate: filteredShowingsByDate });
+      return acc;
+    }, []);
   }, [films, selectedCity]);
 
   const regularFilms = filteredFilms.filter((f) => !f.movieType);
-  const specialFilms = filteredFilms.filter((f) => f.movieType);
 
-  const specialEventsGrouped = specialFilms.reduce((acc, film) => {
-    const type = film.movieType!;
-    if (!acc[type]) {
-      acc[type] = [];
-    }
-    acc[type].push(film);
-    return acc;
-  }, {} as Record<string, Film[]>);
+  const specialEventsGrouped = useMemo(() => {
+    return filteredFilms
+      .filter((f) => f.movieType)
+      .reduce((acc, film) => {
+        const type = film.movieType!;
+        acc[type] ??= [];
+        acc[type].push(film);
+        return acc;
+      }, {} as Record<string, Film[]>);
+  }, [filteredFilms]);
 
   return (
     <main className="min-h-screen p-4 md:p-8 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
