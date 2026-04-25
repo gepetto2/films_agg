@@ -1,69 +1,130 @@
 import re
 import execjs
 from curl_cffi import requests
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
-async def get_target_cinemas(client: requests.AsyncSession, cities: list) -> list:
-    """Pobiera listę kin Helios poprzez parsowanie obiektu stanu window.__NUXT__."""
-    url = "https://helios.pl/"
-    print("Pobieranie listy kin z Helios (parsowanie window.__NUXT__)...")
-    
+async def fetch_nuxt_state(client: requests.AsyncSession, url: str) -> dict:
+    """Pobiera i dekoduje stan window.__NUXT__ ze wskazanej strony."""
     try:
         response = await client.get(url, timeout=60.0)
         if response.status_code != 200:
-            print(f"Błąd pobierania listy kin z Heliosa (Kod {response.status_code})")
-            return []
+            print(f"Błąd HTTP {response.status_code} dla {url}")
+            return {}
             
-        html = response.text
-        
-        match = re.search(r'window\.__NUXT__=(.*?);</script>', html, re.DOTALL)
+        match = re.search(r'window\.__NUXT__=(.*?);</script>', response.text, re.DOTALL)
         if not match:
-            print("Nie znaleziono stanu Nuxt na stronie!")
-            return []
-        
-        js_code = match.group(1)
-        nuxt_state = execjs.eval(js_code)
-        cinemas_data = nuxt_state.get("state", {}).get("core", {}).get("cinemas", [])
-
-        target_cinemas = []
-        for cinema in cinemas_data:
-            city = cinema.get("city")
-            if city in cities:
-                target_cinemas.append({
-                    "id": cinema.get("sourceId"),
-                    "name": cinema.get("name"),
-                    "city": city,
-                    "slug_city": cinema.get("slugCity"),
-                    "slug": cinema.get("slug")
-                })
-                
-        print(f"Znaleziono {len(target_cinemas)} kin Helios dla miast: {', '.join(cities)}.")
-        return target_cinemas
-        
+            return {}
+            
+        return execjs.eval(match.group(1))
     except Exception as e:
-        print(f"Błąd podczas pobierania kin z Heliosa: {e}")
-        return []
+        print(f"Błąd pobierania/parsowania {url}: {e}")
+        return {}
+
+async def get_target_cinemas(client: requests.AsyncSession, cities: list) -> list:
+    """Pobiera listę kin Helios poprzez parsowanie obiektu stanu window.__NUXT__."""
+    print("Pobieranie listy kin z Helios (parsowanie window.__NUXT__)...")
+    nuxt_state = await fetch_nuxt_state(client, "https://helios.pl/")
+    cinemas_data = nuxt_state.get("state", {}).get("core", {}).get("cinemas", [])
+
+    target_cinemas = [
+        {
+            "id": c.get("sourceId"),
+            "name": c.get("name"),
+            "city": c.get("city"),
+            "slug_city": c.get("slugCity"),
+            "slug": c.get("slug")
+        }
+        for c in cinemas_data if c.get("city") in cities
+    ]
+            
+    print(f"Znaleziono {len(target_cinemas)} kin Helios dla miast: {', '.join(cities)}.")
+    return target_cinemas
 
 async def scrape_and_save(supabase, cities=["Poznań"]):
     async with requests.AsyncSession(impersonate="chrome") as client:
         try:
             print("Nawiązywanie połączenia z Heliosem...")
-            
             target_cinemas = await get_target_cinemas(client, cities)
             if not target_cinemas:
                 print("Nie znaleziono kin Heliosa. Zakończono.")
                 return
-                
+
+            movies_cache = {}
+
             for cinema in target_cinemas:
                 cinema_name = cinema['name']
-                cinema_city = cinema['city']
-                print(f"\n--- Zidentyfikowano {cinema_name} (SourceID: {cinema['id']}) ---")
-                
-                # Upsert kina w Supabase (wymaga nałożonego UNIQUE na kolumnach 'name, franchise')
+                print(f"\n--- Repertuar dla: {cinema_name} ---")
+
+                # Zapis kina do bazy
                 cinema_res = supabase.table("cinemas").upsert(
-                    {"name": cinema_name, "city": cinema_city, "franchise": "Helios"},
+                    {"name": cinema_name, "city": cinema['city'], "franchise": "Helios"},
                     on_conflict="name,franchise"
                 ).execute()
                 db_cinema_id = cinema_res.data[0]["id"]
+
+                # Pobranie repertuaru dla danego kina
+                repertoire_url = f"https://helios.pl/{cinema['slug_city']}/{cinema['slug']}/repertuar"
+                nuxt_state = await fetch_nuxt_state(client, repertoire_url)
+
+                repertoire = nuxt_state.get("state", {}).get("repertoire", {})
                 
+                # Tworzymy mapę filmów po ich ID, aby łatwo znaleźć tytuł
+                movies_title_map = {m.get("_id"): m.get("title") for m in repertoire.get("list", []) if m.get("_id")}
+                screenings_by_date = repertoire.get("screenings", {})
+
+                if not screenings_by_date:
+                    print(f"Brak seansów dla kina {cinema_name}.")
+                    continue
+
+                print("Zapisywanie filmów do bazy...")
+                movies_to_upsert = {title: {"title": title} for title in movies_title_map.values() if title}
+                if movies_to_upsert:
+                    movie_res = supabase.table("movies").upsert(
+                        list(movies_to_upsert.values()),
+                        on_conflict="title"
+                    ).execute()
+                    movies_cache.update({m["title"]: m["id"] for m in movie_res.data})
+
+                print("Przetwarzanie i zapisywanie seansów do bazy...")
+                new_screenings = {}
+                for date, movies_data in screenings_by_date.items():
+                    for movie_id, movie_info in movies_data.items():
+                        title = movies_title_map.get(movie_id)
+                        db_movie_id = movies_cache.get(title)
+                        
+                        if not db_movie_id:
+                            continue
+                            
+                        for scr in movie_info.get("screenings", []):
+                            start_time_raw = scr.get("timeFrom")
+                            if not start_time_raw:
+                                continue
+                                
+                            dt_obj = datetime.strptime(start_time_raw, "%Y-%m-%d %H:%M:%S")
+                            start_time = dt_obj.replace(tzinfo=ZoneInfo("Europe/Warsaw")).isoformat()
+                                
+                            room_name = scr.get("cinemaScreen", {}).get("feature")
+                            
+                            screening_key = (db_movie_id, db_cinema_id, start_time, room_name)
+                            new_screenings[screening_key] = {
+                                "movie_id": db_movie_id,
+                                "cinema_id": db_cinema_id,
+                                "start_time": start_time,
+                                "room_name": room_name
+                            }
+                            
+                if new_screenings:
+                    screenings_list = list(new_screenings.values())
+                    for i in range(0, len(screenings_list), 1000):
+                        supabase.table("screenings").upsert(
+                            screenings_list[i:i+1000],
+                            on_conflict="movie_id,cinema_id,start_time,room_name",
+                            ignore_duplicates=True
+                        ).execute()
+                    print(f"Zapisano {len(new_screenings)} seansów do bazy dla kina {cinema_name}.")
+
+            print("\nZakończono zapisywanie danych z Heliosa!")
+
         except Exception as e:
             print(f"Wystąpił błąd w trakcie scrapowania Heliosa: {str(e)}")
