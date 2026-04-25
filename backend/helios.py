@@ -1,4 +1,5 @@
 import re
+import asyncio
 import execjs
 from curl_cffi import requests
 from datetime import datetime
@@ -77,6 +78,46 @@ async def scrape_and_save(supabase, cities=["Poznań"]):
                     print(f"Brak seansów dla kina {cinema_name}.")
                     continue
 
+                # --- POBIERANIE INFORMACJI O SALACH Z REST API ---
+                cinema_source_id = cinema['id']
+                screens_url = f"https://restapi.helios.pl/api/cinema/{cinema_source_id}/screen"
+                screens_mapping = {}
+                try:
+                    screens_resp = await client.get(screens_url, timeout=30.0)
+                    if screens_resp.status_code == 200:
+                        for screen in screens_resp.json():
+                            screens_mapping[screen["id"]] = screen.get("name", "")
+                except Exception as e:
+                    print(f"Błąd pobierania sal dla kina {cinema_name}: {e}")
+
+                sem = asyncio.Semaphore(20)
+                async def fetch_screening_screen_id(scr_id):
+                    url = f"https://restapi.helios.pl/api/cinema/{cinema_source_id}/screening/{scr_id}"
+                    async with sem:
+                        try:
+                            resp = await client.get(url, timeout=15.0)
+                            if resp.status_code == 200:
+                                return scr_id, resp.json().get("screenId")
+                        except Exception:
+                            pass
+                    return scr_id, None
+
+                screening_tasks = [
+                    fetch_screening_screen_id(scr.get("sourceId"))
+                    for movies_data in screenings_by_date.values()
+                    for movie_info in movies_data.values()
+                    for scr in movie_info.get("screenings", [])
+                    if scr.get("sourceId")
+                ]
+                
+                if screening_tasks:
+                    print(f"Pobieranie szczegółów {len(screening_tasks)} seansów w celu ustalenia sal (może to chwilę potrwać)...")
+                    screening_results = await asyncio.gather(*screening_tasks)
+                    screening_screen_map = dict(screening_results)
+                else:
+                    screening_screen_map = {}
+                # -------------------------------------------------
+
                 print("Zapisywanie filmów do bazy...")
                 movies_to_upsert = {title: {"title": title} for title in movies_title_map.values() if title}
                 if movies_to_upsert:
@@ -104,14 +145,16 @@ async def scrape_and_save(supabase, cities=["Poznań"]):
                             dt_obj = datetime.strptime(start_time_raw, "%Y-%m-%d %H:%M:%S")
                             start_time = dt_obj.replace(tzinfo=ZoneInfo("Europe/Warsaw")).isoformat()
                                 
-                            room_name = scr.get("cinemaScreen", {}).get("feature")
+                            scr_id = scr.get("sourceId")
+                            screen_id = screening_screen_map.get(scr_id)
+                            room_name = screens_mapping.get(screen_id, "") if screen_id else ""
                             
                             screening_key = (db_movie_id, db_cinema_id, start_time, room_name)
                             new_screenings[screening_key] = {
                                 "movie_id": db_movie_id,
                                 "cinema_id": db_cinema_id,
                                 "start_time": start_time,
-                                "room_name": room_name
+                                "room_name": room_name,
                             }
                             
                 if new_screenings:
