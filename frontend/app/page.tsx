@@ -11,6 +11,7 @@ type Showing = {
   lang: string | null;
   bookingLink: string | null;
   availabilityRatio: number | null;
+  roomName: string;
 };
 
 type Film = {
@@ -147,7 +148,14 @@ function FilmCard({ film }: { film: Film }) {
                             )}
                           </div>
                           <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mt-2 flex justify-between items-end">
-                            <p>{showing.cinemaName}</p>
+                        <div>
+                          <p>{showing.cinemaName}</p>
+                          {showing.roomName && (
+                            <p className="text-xs opacity-75 font-normal mt-0.5">
+                              {showing.roomName}
+                            </p>
+                          )}
+                        </div>
                             {showing.availabilityRatio !== null && (
                               <span className="text-xs opacity-75 font-semibold" title="Dostępność miejsc">
                                 {Math.round(showing.availabilityRatio * 100)}% dost
@@ -188,6 +196,7 @@ export default function Home() {
             release_year,
             screenings (
               start_time,
+              room_name,
               lang,
               booking_link,
               availability_ratio,
@@ -226,6 +235,7 @@ export default function Home() {
               lang: screening.lang,
               bookingLink: screening.booking_link,
               availabilityRatio: screening.availability_ratio,
+              roomName: screening.room_name || "",
             });
           });
 

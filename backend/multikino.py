@@ -141,7 +141,7 @@ async def scrape_and_save(supabase, cities=["Poznań"]):
                     movies_to_upsert[title] = {
                         "title": title,
                         "movie_type": movie_type,
-                        "length": film.get("runningTime") if film.get("runningTime") > 0 else None,
+                        "length": film.get("runningTime") if film.get("runningTime") and film.get("runningTime") > 0 else None,
                         "poster": poster,
                         "release_year": release_year,
                         "mk_description": film.get("synopsisShort"),
