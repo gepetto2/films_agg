@@ -80,7 +80,25 @@ async def scrape_and_save(supabase, cities=["Poznań"]):
                 nuxt_state = await fetch_nuxt_state(client, repertoire_url)
                 repertoire = nuxt_state.get("state", {}).get("repertoire", {})
                 
-                movies_title_map = {m.get("sourceId"): (m.get("title") or m.get("name")) for m in repertoire.get("list", []) if m.get("sourceId")}
+                clean_titles = {}
+                for date_data in repertoire.get("screenings", {}).values():
+                    for _id, item_data in date_data.items():
+                        if _id not in clean_titles:
+                            for scr in item_data.get("screenings", []):
+                                movies = scr.get("screeningMovies", [])
+                                if movies and movies[0].get("movie", {}).get("title"):
+                                    clean_titles[_id] = movies[0]["movie"]["title"]
+                                    break
+
+                api_id_to_title = {}
+                orig_title_to_title = {}
+                for m in repertoire.get("list", []):
+                    source_id = m.get("sourceId")
+                    orig_title = m.get("title") or m.get("name")
+                    if source_id and orig_title:
+                        title = clean_titles.get(m.get("_id")) or orig_title
+                        api_id_to_title[source_id] = title
+                        orig_title_to_title[orig_title] = title
 
                 # --- POBIERANIE SEANSÓW Z REST API ---
                 screenings_url = f"https://restapi.helios.pl/api/cinema/{cinema_source_id}/screening"
@@ -108,7 +126,8 @@ async def scrape_and_save(supabase, cities=["Poznań"]):
                     continue
 
                 print("Zapisywanie filmów do bazy...")
-                movies_to_upsert = {title: {"title": title} for title in movies_title_map.values() if title}
+                movies_to_upsert = {title: {"title": title} for title in api_id_to_title.values() if title}
+                            
                 if movies_to_upsert:
                     movie_res = supabase.table("movies").upsert(
                         list(movies_to_upsert.values()),
@@ -122,7 +141,7 @@ async def scrape_and_save(supabase, cities=["Poznań"]):
                 # 1. Zwykłe seanse
                 for scr in screenings_data:
                     movie_id_api = scr.get("movieId")
-                    title = movies_title_map.get(movie_id_api)
+                    title = api_id_to_title.get(movie_id_api)
                     if not title:
                         continue
                         
@@ -151,7 +170,9 @@ async def scrape_and_save(supabase, cities=["Poznań"]):
                             
                 # 2. Seanse wydarzeń specjalnych
                 for event in events_data:
-                    title = event.get("name")
+                    orig_title = event.get("name")
+                    title = orig_title_to_title.get(orig_title) or orig_title
+                    
                     db_movie_id = movies_cache.get(title)
                     
                     start_time_raw = event.get("timeFrom")
