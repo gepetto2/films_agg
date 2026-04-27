@@ -2,7 +2,8 @@ import asyncio
 import json
 from curl_cffi import requests
 from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
+from utils import parse_start_time, merge_release_year
+from database import get_movies_cache, upsert_cinema, upsert_movies_batch, upsert_screenings_chunked
 
 async def get_target_cinemas(client: requests.AsyncSession, cities: list) -> list:
     """Pobiera listę kin Cinema City i filtruje te z wybranych miast."""
@@ -62,8 +63,7 @@ async def scrape_cinema_city(supabase, cities=["Poznań"]):
             movies_cache = {}  # Pamięć podręczna dla pobranych/dodanych filmów z bazy
             
             print("Pobieranie istniejących filmów z bazy (do weryfikacji daty premiery, plakatów i typu filmu)...")
-            all_movies_res = supabase.table("movies").select("title, release_year, poster, movie_type").execute()
-            existing_db_movies = {m["title"]: m for m in all_movies_res.data}
+            existing_db_movies = get_movies_cache(supabase)
 
             sem = asyncio.Semaphore(10)  # Ograniczenie do max. 10 jednoczesnych połączeń
 
@@ -79,11 +79,7 @@ async def scrape_cinema_city(supabase, cities=["Poznań"]):
                 print(f"\n--- Rozpoczynam scraping dla: {cinema_name} (ID: {cinema_id_api}) ---")
 
                 # Upsert kina w Supabase (wymaga nałożonego UNIQUE na kolumnach 'name, franchise')
-                cinema_res = supabase.table("cinemas").upsert(
-                    {"name": cinema_name, "city": cinema_city, "franchise": "Cinema City"},
-                    on_conflict="name,franchise"
-                ).execute()
-                db_cinema_id = cinema_res.data[0]["id"]
+                db_cinema_id = upsert_cinema(supabase, cinema_name, cinema_city, "Cinema City")
 
                 # Pobranie dostępnych dat
                 until_date = (datetime.now() + timedelta(days=365)).strftime("%Y-%m-%d")
@@ -142,13 +138,10 @@ async def scrape_cinema_city(supabase, cities=["Poznań"]):
                             movie_type = existing_movie.get("movie_type")
 
                         raw_release_year = film.get("releaseYear")
-                        release_year = str(raw_release_year).replace('/', ',').split(',')[0].strip() if raw_release_year else None
+                        new_year = str(raw_release_year).replace('/', ',').split(',')[0].strip() if raw_release_year else None
                         
                         existing_year = existing_movie.get("release_year")
-                        if existing_year and release_year:
-                            release_year = str(min(int(existing_year), int(release_year))) if str(existing_year).isdigit() and str(release_year).isdigit() else str(min(str(existing_year), str(release_year)))
-                        elif existing_year:
-                            release_year = existing_year
+                        release_year = merge_release_year(existing_year, new_year)
                             
                         existing_movie["release_year"] = release_year
                         
@@ -167,12 +160,8 @@ async def scrape_cinema_city(supabase, cities=["Poznań"]):
                         
                 # Zbiorczy Upsert wszystkich nowych filmów ze wszystkich dni
                 if all_movies_to_upsert:
-                    movies_res = supabase.table("movies").upsert(
-                        list(all_movies_to_upsert.values()),
-                        on_conflict="title"
-                    ).execute()
-                    for m in movies_res.data:
-                        movies_cache[m["title"]] = m["id"]
+                    updated_cache = upsert_movies_batch(supabase, all_movies_to_upsert)
+                    movies_cache.update(updated_cache)
 
                 # Utworzenie mapy z API ID do BAZA ID
                 film_id_map = {}
@@ -191,14 +180,7 @@ async def scrape_cinema_city(supabase, cities=["Poznań"]):
                     if not api_film_id or not start_time_raw:
                         continue
 
-                    try:
-                        # Zamiana na obiekt daty z polską strefą czasową (zabezpieczenie przed nadpisaniem)
-                        dt_obj = datetime.fromisoformat(start_time_raw)
-                        if dt_obj.tzinfo is None:
-                            dt_obj = dt_obj.replace(tzinfo=ZoneInfo("Europe/Warsaw"))
-                        start_time = dt_obj.isoformat()
-                    except ValueError:
-                        start_time = start_time_raw
+                    start_time = parse_start_time(start_time_raw)
 
                     db_movie_id = film_id_map.get(api_film_id)
                     if not db_movie_id:
@@ -225,16 +207,7 @@ async def scrape_cinema_city(supabase, cities=["Poznań"]):
                     }
 
                 if new_screenings:
-                    screenings_list = list(new_screenings.values())
-                    # Paginacja na wypadek bardzo dużej ilości seansów (np. limit zapytań Supabase)
-                    for i in range(0, len(screenings_list), 1000):
-                        supabase.table("screenings").upsert(
-                            screenings_list[i:i+1000],
-                            on_conflict="movie_id,cinema_id,start_time,room_name",
-                            ignore_duplicates=True
-                        ).execute()
-                        
-                    print(f"Zapisano {len(new_screenings)} seansów do bazy dla kina {cinema_name}.")
+                    upsert_screenings_chunked(supabase, new_screenings, cinema_name)
 
             print(f"\nZakończono zapisywanie danych z Cinema City dla miast: {', '.join(cities)}!")
 

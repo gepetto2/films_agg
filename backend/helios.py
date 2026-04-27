@@ -3,6 +3,8 @@ import execjs
 from curl_cffi import requests
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+from utils import parse_start_time
+from database import upsert_cinema, upsert_movies_batch, upsert_screenings_chunked
 
 async def fetch_nuxt_state(client: requests.AsyncSession, url: str) -> dict:
     """Pobiera i dekoduje stan window.__NUXT__ ze wskazanej strony."""
@@ -57,11 +59,7 @@ async def scrape_and_save(supabase, cities=["Poznań"]):
                 print(f"\n--- Repertuar dla: {cinema_name} ---")
 
                 # Zapis kina do bazy
-                cinema_res = supabase.table("cinemas").upsert(
-                    {"name": cinema_name, "city": cinema['city'], "franchise": "Helios"},
-                    on_conflict="name,franchise"
-                ).execute()
-                db_cinema_id = cinema_res.data[0]["id"]
+                db_cinema_id = upsert_cinema(supabase, cinema_name, cinema['city'], "Helios")
 
                 # --- POBIERANIE INFORMACJI O SALACH Z REST API ---
                 cinema_source_id = cinema['id']
@@ -129,11 +127,8 @@ async def scrape_and_save(supabase, cities=["Poznań"]):
                 movies_to_upsert = {title: {"title": title} for title in api_id_to_title.values() if title}
                             
                 if movies_to_upsert:
-                    movie_res = supabase.table("movies").upsert(
-                        list(movies_to_upsert.values()),
-                        on_conflict="title"
-                    ).execute()
-                    movies_cache.update({m["title"]: m["id"] for m in movie_res.data})
+                    updated_cache = upsert_movies_batch(supabase, movies_to_upsert)
+                    movies_cache.update(updated_cache)
 
                 print("Przetwarzanie i zapisywanie seansów do bazy...")
                 new_screenings = {}
@@ -153,8 +148,7 @@ async def scrape_and_save(supabase, cities=["Poznań"]):
                     if not db_movie_id or not start_time_raw or not scr_id:
                         continue
                         
-                    dt_obj = datetime.fromisoformat(start_time_raw)
-                    start_time = dt_obj.isoformat()
+                    start_time = parse_start_time(start_time_raw)
                         
                     screen_id = scr.get("screenId")
                     room_name = screens_mapping.get(screen_id, "") if screen_id else ""
@@ -181,8 +175,7 @@ async def scrape_and_save(supabase, cities=["Poznań"]):
                     if not db_movie_id or not start_time_raw or not scr_id:
                         continue
                         
-                    dt_obj = datetime.fromisoformat(start_time_raw)
-                    start_time = dt_obj.isoformat()
+                    start_time = parse_start_time(start_time_raw)
                         
                     screen_id = event.get("screenId")
                     room_name = screens_mapping.get(screen_id, "") if screen_id else ""
@@ -197,14 +190,7 @@ async def scrape_and_save(supabase, cities=["Poznań"]):
                     }
                             
                 if new_screenings:
-                    screenings_list = list(new_screenings.values())
-                    for i in range(0, len(screenings_list), 1000):
-                        supabase.table("screenings").upsert(
-                            screenings_list[i:i+1000],
-                            on_conflict="movie_id,cinema_id,start_time,room_name",
-                            ignore_duplicates=True
-                        ).execute()
-                    print(f"Zapisano {len(new_screenings)} seansów do bazy dla kina {cinema_name}.")
+                    upsert_screenings_chunked(supabase, new_screenings, cinema_name)
 
             print("\nZakończono zapisywanie danych z Heliosa!")
 

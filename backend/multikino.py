@@ -1,6 +1,6 @@
 from curl_cffi import requests
-from datetime import datetime
-from zoneinfo import ZoneInfo
+from utils import parse_start_time, merge_release_year
+from database import get_movies_cache, upsert_cinema, upsert_movies_batch, upsert_screenings_chunked
 
 async def get_target_cinemas(client: requests.AsyncSession, cities: list) -> list:
     """Pobiera listę kin Multikino i filtruje te z wybranych miast."""
@@ -55,8 +55,7 @@ async def scrape_and_save(supabase, cities=["Poznań"]):
                 return
                 
             print("Pobieranie istniejących filmów z bazy (do weryfikacji daty premiery, plakatów i typu filmu)...")
-            all_movies_res = supabase.table("movies").select("title, release_year, poster, movie_type").execute()
-            existing_db_movies = {m["title"]: m for m in all_movies_res.data}
+            existing_db_movies = get_movies_cache(supabase)
             movies_cache = {}
 
             # KROK 3: Iteracja po znalezionych kinach
@@ -68,11 +67,7 @@ async def scrape_and_save(supabase, cities=["Poznań"]):
                 print(f"\n--- Rozpoczynam scraping dla: {cinema_name} (ID: {cinema_id_api}) ---")
                 
                 # Upsert kina w Supabase (wymaga nałożonego UNIQUE na kolumnach 'name, franchise')
-                cinema_res = supabase.table("cinemas").upsert(
-                    {"name": cinema_name, "city": cinema_city, "franchise": "Multikino"},
-                    on_conflict="name,franchise"
-                ).execute()
-                db_cinema_id = cinema_res.data[0]["id"]
+                db_cinema_id = upsert_cinema(supabase, cinema_name, cinema_city, "Multikino")
                 
                 # Właściwe zapytanie do API kina
                 target_url = f"https://www.multikino.pl/api/microservice/showings/cinemas/{cinema_id_api}/films"
@@ -123,13 +118,10 @@ async def scrape_and_save(supabase, cities=["Poznań"]):
                         movie_type = existing_movie.get("movie_type")
 
                     release_date = film.get("releaseDate")
-                    release_year = release_date[:4] if release_date else None
+                    new_year = release_date[:4] if release_date else None
                     
                     existing_year = existing_movie.get("release_year")
-                    if existing_year and release_year:
-                        release_year = str(min(int(existing_year), int(release_year))) if str(existing_year).isdigit() and str(release_year).isdigit() else str(min(str(existing_year), str(release_year)))
-                    elif existing_year:
-                        release_year = existing_year
+                    release_year = merge_release_year(existing_year, new_year)
                         
                     existing_movie["release_year"] = release_year
                     
@@ -148,12 +140,8 @@ async def scrape_and_save(supabase, cities=["Poznań"]):
                     }
                     
                 if movies_to_upsert:
-                    movie_res = supabase.table("movies").upsert(
-                        list(movies_to_upsert.values()),
-                        on_conflict="title"
-                    ).execute()
-                    for m in movie_res.data:
-                        movies_cache[m["title"]] = m["id"]
+                    updated_cache = upsert_movies_batch(supabase, movies_to_upsert)
+                    movies_cache.update(updated_cache)
 
                 # KROK 5: Zbieranie seansów do operacji Upsert
                 new_screenings = {}
@@ -169,13 +157,7 @@ async def scrape_and_save(supabase, cities=["Poznań"]):
                             if not start_time_raw:
                                 continue
                                 
-                            try:
-                                dt_obj = datetime.fromisoformat(start_time_raw)
-                                if dt_obj.tzinfo is None:
-                                    dt_obj = dt_obj.replace(tzinfo=ZoneInfo("Europe/Warsaw"))
-                                start_time = dt_obj.isoformat()
-                            except ValueError:
-                                start_time = start_time_raw
+                            start_time = parse_start_time(start_time_raw)
                                 
                             screen_name = session.get("screenName", "")
                             booking_url = session.get("bookingUrl", "")
@@ -201,12 +183,7 @@ async def scrape_and_save(supabase, cities=["Poznań"]):
                             }
                                 
                 if new_screenings:
-                    supabase.table("screenings").upsert(
-                        list(new_screenings.values()),
-                        on_conflict="movie_id,cinema_id,start_time,room_name",
-                        ignore_duplicates=True
-                    ).execute()
-                    print(f"Zapisano {len(new_screenings)} seansów (upsert) dla kina {cinema_name}.")
+                    upsert_screenings_chunked(supabase, new_screenings, cinema_name)
 
             print("\nZakończono zapisywanie danych z Multikina!")
 
